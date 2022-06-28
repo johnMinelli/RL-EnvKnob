@@ -56,33 +56,34 @@ class Logger(object):
         self.episode_start_time = time.time()
         return self
 
-    def step(self, losses):
+    def step(self, steps, losses, lr):
         if self.episode is not None:
-            self.steps += self.batch_size
-            self.total_steps += self.batch_size
+            self.steps += steps
+            self.total_steps += steps
             # losses error & metrics
             for single_update_losses in losses:
                 for k, v in single_update_losses.items():
-                    self.total_losses[k] = (self.total_losses.get(k, 0) + v).numpy()
+                    self.total_losses[k] = (self.total_losses.get(k, []) + [v.numpy()])
 
             avg_losses = np.mean([[np.mean((v).numpy()) for v in l.values()] for l in losses], 0)
-            self.log(' * ' + ', '.join(['Avg '+str(k).capitalize()+' : {:.3f}'.format(v) for k, v in zip(self.total_losses.keys(), avg_losses)]))
+            self.log(' * ' + ', '.join(['Avg '+str(k).capitalize()+' : {:.5f}'.format(v) for k, v in zip(self.total_losses.keys(), avg_losses)])+'\tLr: '+str(lr))
             self._log_stats_to_dashboards(self.total_steps, {str(k).capitalize():v for k, v in zip(self.total_losses.keys(), avg_losses)})
+            self._log_stats_to_dashboards(self.total_steps, {"AC_lr": lr})
 
-    def episode_stop(self, total_reward,steps):
+    def episode_stop(self, total_reward, score):
         if self.episode is not None:
             episode_time = time.time() - self.episode_start_time
-            self.steps = steps
             avg_time = episode_time/self.steps
-            avg_reward = total_reward / (self.steps / self.batch_size)
-            avg_losses = np.array(list(self.total_losses.values()))/self.steps
+            avg_reward = total_reward / self.steps
+            avg_losses = np.mean(np.array(list(self.total_losses.values())), 1)
             reward_over_time = total_reward / episode_time
 
             self.log('Ep: %d / %d - Time: %d sec' % (self.episode, self.episodes, episode_time) + '\t' +
+                     ' * Game Score : {}'.format(score) +
                      ' * Avg Reward : {:.3f}'.format(avg_reward) + ', Reward/time : {:.3f}'.format(reward_over_time) +
                      ' - Avg Losses : [' + ', '.join([str(l) for l in avg_losses]) + ']' +
                      ' - Avg Time : {:.3f}'.format(avg_time))
-            self._log_stats_to_dashboards(self.episode, {"Avg_reward": avg_reward, "Reward_over_time": reward_over_time, "Avg_time": avg_time})
+            self._log_stats_to_dashboards(self.total_steps, {"Game_score": score, "Avg_reward": avg_reward, "Reward_over_time": reward_over_time, "Avg_time": avg_time})
 
             if self.progress_bar is not None:
                 self.progress_bar.update(self.episode + 1)

@@ -1,9 +1,13 @@
-﻿import numpy as np
+﻿import os
+
+import numpy as np
 import pygame, random
 from gym import Env
 from skimage.transform import resize
+from matplotlib import pyplot as plt
 
-skier_images = ["skier_down.png", "skier_right1.png", "skier_right2.png", "skier_left2.png", "skier_left1.png"]
+RELATIVE_PATH = "."
+skier_images = [RELATIVE_PATH+"/resources/skier_down.png", RELATIVE_PATH+"/resources/skier_right1.png", RELATIVE_PATH+"/resources/skier_right2.png", RELATIVE_PATH+"/resources/skier_left2.png", RELATIVE_PATH+"/resources/skier_left1.png"]
 STATE_W = 64  # Atari is 160x192
 STATE_H = 64
 CNN_STATE_W = 224
@@ -21,7 +25,7 @@ class SkierClass(pygame.sprite.Sprite):
     def __init__(self):
         # Create a skier
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.image.load("skier_down.png")
+        self.image = pygame.image.load(RELATIVE_PATH+"/resources/skier_down.png")
         self.rect = self.image.get_rect()
         self.rect.center = [SCREEN_W/2, 100]
         self.angle = 0
@@ -76,9 +80,10 @@ class Skiing(Env):
     def __init__(self, opt, generate_map_fn=None):
         super(Skiing, self).__init__()
         self.opt = opt
+        self.step_reward = opt.step_reward
         self.generator = generate_map_fn
-        self.obs_w = CNN_STATE_W if opt.cnn else STATE_W
-        self.obs_h = CNN_STATE_H if opt.cnn else STATE_H
+        self.obs_w = CNN_STATE_W if opt.cnn>0 else STATE_W
+        self.obs_h = CNN_STATE_H if opt.cnn>0 else STATE_H
         self.action_space = 5
         self.steps = 0
 
@@ -86,6 +91,7 @@ class Skiing(Env):
         self.skier = None
         self.obstacles = None
 
+        # os.environ["SDL_VIDEODRIVER"] = "dummy"
         pygame.init()
         self.screen = pygame.display.set_mode([SCREEN_W, SCREEN_H])
         self.clock = pygame.time.Clock()
@@ -109,7 +115,7 @@ class Skiing(Env):
                 if not (location in locations):
                     locations.append(location)
                     type = np.random.choice(["tree", "flag"], p=[0.3, 0.7])
-                    img = "skier_tree.png" if type == "tree" else "skier_flag.png"
+                    img = RELATIVE_PATH+"/resources/skier_tree.png" if type == "tree" else RELATIVE_PATH+"/resources/skier_flag.png"
                     obstacle = ObstacleClass(img, location, type)
                     self.obstacles.add(obstacle)
         else:
@@ -120,7 +126,7 @@ class Skiing(Env):
                 if not (location in locations):
                     locations.append(location)
                     type = random.choice(["flag"])
-                    img = "skier_tree.png" if type == "tree" else "skier_flag.png"
+                    img = RELATIVE_PATH+"/resources/skier_tree.png" if type == "tree" else RELATIVE_PATH+"/resources/skier_flag.png"
                     obstacle = ObstacleClass(img, location, type)
                     self.obstacles.add(obstacle)
 
@@ -145,7 +151,7 @@ class Skiing(Env):
         # if action > 0:
         #     self.speed = self.skier.turn(1)
         self.steps += 1
-        reward_over_skipped_steps = -1
+        reward_over_skipped_steps = self.step_reward
         for _ in range(skip):
             self.speed = self.skier.turn(action-2)  # int(self.action_space/2)
             self.skier.move(self.speed)
@@ -162,23 +168,25 @@ class Skiing(Env):
             if hit:
                 if hit[0].type == "tree" and not hit[0].passed:
                     self.score_points -= 50
-                    step_reward = -10
-                    self.skier.image = pygame.image.load("skier_crash.png")
+                    step_reward = -2
+                    self.skier.image = pygame.image.load(RELATIVE_PATH+"/resources/skier_crash.png")
                     pygame.time.delay(50)
-                    self.skier.iamge = pygame.image.load("skier_down.png")
+                    self.skier.iamge = pygame.image.load(RELATIVE_PATH+"/resources/skier_down.png")
                     self.skier.angle = 0
-                    speed = [0, MAX_SPEED]
+                    # self.speed = [0, MAX_SPEED]
                     hit[0].passed = True
                 elif hit[0].type == "flag" and not hit[0].passed:
                     self.score_points += 25
-                    step_reward = 10
-                    hit[0].kill()
+                    step_reward = 1
+                    hit[0].passed = True
+                    # hit[0].kill()
 
             self.obstacles.update(speed=self.speed)
             # cumulate total_reward
             reward_over_skipped_steps += step_reward
             # Check end of episode
-            if done := self.steps >= MAX_STEPS:
+            done = self.steps >= MAX_STEPS
+            if done:
                 break
 
         self.state = self.render()
@@ -203,27 +211,28 @@ class Skiing(Env):
         return self._create_observation()
 
     def _create_observation(self):
-        observation = np.zeros((SCREEN_W, SCREEN_H, LAYERS_ENTITIES))
-        # mid = int(self.obs_w/2)
-        # max_score = abs(WIN_SCORE if self.score_points > 0 else LOOSE_SCORE)
-        # end = (mid if self.score_points>0 else -mid)+int(abs(self.score_points) * mid / max_score)
+        if self.opt.cnn>0:
+            scaled_screen = pygame.transform.smoothscale(self.screen, (self.obs_w, self.obs_h))
+            return rgb2gray(np.transpose(np.array(pygame.surfarray.pixels3d(scaled_screen), dtype=np.float32), axes=(1, 0, 2)))/255.
+        else:
+            observation = np.zeros((SCREEN_W, SCREEN_H, LAYERS_ENTITIES), dtype=np.float32)
+            # mid = int(self.obs_w/2)
+            # max_score = abs(WIN_SCORE if self.score_points > 0 else LOOSE_SCORE)
+            # end = (mid if self.score_points>0 else -mid)+int(abs(self.score_points) * mid / max_score)
 
-        observation[max(0, self.skier.rect.top):self.skier.rect.bottom, max(0, self.skier.rect.left):self.skier.rect.right, 0] = 1
-        for obstacle in self.obstacles:
-            observation[max(0, obstacle.rect.top):obstacle.rect.bottom, max(0, obstacle.rect.left):obstacle.rect.right,
-            1 if obstacle.type == 'tree' else 2] = 1
-        scaled_obs = resize(observation, (self.obs_w, self.obs_h), mode='reflect', anti_aliasing=True)
-        # add score interface
-        # scaled_obs[1, min(mid, end):max(mid, end), 0] = 1
-        # add time interface
-        scaled_obs[0, 0:int(self.steps*self.obs_w/MAX_STEPS), 0] = 1
+            observation[max(0, self.skier.rect.top):self.skier.rect.bottom,
+            max(0, self.skier.rect.left):self.skier.rect.right, 0] = 1
+            for obstacle in self.obstacles:
+                observation[max(0, obstacle.rect.top):obstacle.rect.bottom,
+                max(0, obstacle.rect.left):obstacle.rect.right, 1 if obstacle.type == 'tree' else 2] = 1
+            scaled_obs = resize(observation, (self.obs_w, self.obs_h), mode='reflect', anti_aliasing=True)
+            # add score interface
+            # scaled_obs[1, min(mid, end):max(mid, end), 0] = 1
+            # add time interface
+            scaled_obs[0, 0:int(self.steps * self.obs_w / MAX_STEPS), 0] = 1
+            return np.transpose(scaled_obs, axes=(2,0,1)).ravel()
 
-        return scaled_obs if self.opt.cnn else np.transpose(scaled_obs, axes=(2,0,1)).ravel()
 
-        # pygame.transform.smoothscale(self.screen, (self.obs_w, self.obs_h))
-        # np.transpose(
-        #     np.array(pygame.surfarray.pixels3d(scaled_screen)), axes=(1, 0, 2)
-        # )
 
     def close(self):
         self._destroy_sprites()
