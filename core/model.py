@@ -7,16 +7,41 @@ from keras import backend as K, initializers
 import numpy as np
 from keras import Input, Model, Sequential
 from keras.callbacks import TensorBoard
-from keras.layers import Lambda, Flatten, Dense, Concatenate, BatchNormalization, Conv2D
+from keras.layers import Lambda, Flatten, Dense, Concatenate, BatchNormalization, Conv2D, Softmax, Multiply
 from keras.optimizers import Adam, RMSprop, SGD, Adagrad, Adadelta, Adamax
 import tensorflow as tf
 from keras.optimizers.schedules.learning_rate_schedule import ExponentialDecay
 from keras.saving.save import load_model
 
-from env import STATE_W, STATE_H, LAYERS_ENTITIES, CNN_STATE_W, CNN_STATE_H
+from env import CNN_STATE_W, CNN_STATE_H, GRID_SIZE
 
 
-def create_actor_cnn(shape: tuple, action_size: int) -> Model:
+def create_actor_gen_cnn(shape: tuple, grid_size: int) -> Model:
+    # first branch
+    states = Input(shape, name='input_state')
+    free_pos = Input(grid_size, name='input_positions')
+    conv1 = Conv2D(32, (8, 8), strides=(4, 4), activation='relu')(states)
+    conv2 = Conv2D(64, (4, 4), strides=(2, 2), activation='relu')(conv1)
+    conv3 = Conv2D(64, (3, 3), strides=(1, 1), activation='relu')(conv2)
+    features = Flatten(name='flatten')(conv3)
+    # second branch
+    difficulty = Input(shape=(1), name="input_aux")
+    merge = Concatenate(axis=1)([features, difficulty])
+    # predictor
+    dense = Dense(512, activation='relu', name='fc1')(merge)
+    output = Dense(grid_size, name='predictions')(dense)
+    filtered_output = Multiply(name='filtered_output')([output, free_pos])
+    prob_filtered_output = Softmax(name='activation', axis=1)(filtered_output)
+
+    # Create the model
+    model = Model(inputs=[states, difficulty, free_pos], outputs=[prob_filtered_output])
+
+    model.compile()
+
+    return model
+
+
+def create_critic_gen_cnn(shape: tuple) -> Model:
     # first branch
     states = Input(shape, name='input')
     conv1 = Conv2D(32, (8, 8), strides=(4, 4), activation='relu')(states)
@@ -28,7 +53,7 @@ def create_actor_cnn(shape: tuple, action_size: int) -> Model:
     merge = Concatenate(axis=1)([features, difficulty])
     # predictor
     dense = Dense(512, activation='relu', name='fc1')(merge)
-    output = Dense(action_size, activation='softmax', name='predictions')(dense)
+    output = Dense(1, name='output', activation=None)(dense)
 
     # Create the model
     model = Model(inputs=[states, difficulty], outputs=[output])
@@ -38,18 +63,34 @@ def create_actor_cnn(shape: tuple, action_size: int) -> Model:
     return model
 
 
-def create_critic_cnn(shape: tuple) -> Model:
+def create_actor_sol_cnn(shape: tuple, action_size: int) -> Model:
     # first branch
     states = Input(shape, name='input')
     conv1 = Conv2D(32, (8, 8), strides=(4, 4), activation='relu')(states)
     conv2 = Conv2D(64, (4, 4), strides=(2, 2), activation='relu')(conv1)
     conv3 = Conv2D(64, (3, 3), strides=(1, 1), activation='relu')(conv2)
     features = Flatten(name='flatten')(conv3)
-    # second branch
-    difficulty = Input(shape=(1))
-    merge = Concatenate(axis=1)([features, difficulty])
     # predictor
-    dense = Dense(512, activation='relu', name='fc1')(merge)
+    dense = Dense(512, activation='relu', name='fc1')(features)
+    output = Dense(action_size, activation='softmax', name='predictions')(dense)
+
+    # Create the model
+    model = Model(inputs=states, outputs=output)
+
+    model.compile()
+
+    return model
+
+
+def create_critic_sol_cnn(shape: tuple) -> Model:
+    # first branch
+    states = Input(shape, name='input')
+    conv1 = Conv2D(32, (8, 8), strides=(4, 4), activation='relu')(states)
+    conv2 = Conv2D(64, (4, 4), strides=(2, 2), activation='relu')(conv1)
+    conv3 = Conv2D(64, (3, 3), strides=(1, 1), activation='relu')(conv2)
+    features = Flatten(name='flatten')(conv3)
+    # predictor
+    dense = Dense(512, activation='relu', name='fc1')(features)
     output = Dense(1, name='output', activation=None)(dense)
 
     # Create the model
@@ -93,41 +134,34 @@ class AC:
     def __init__(self, opt: Namespace, action_space_size: int, load_path: str, load_from_episode: int = None):
         self.action_space_size = action_space_size
         self.save_path = Path(opt.models_path)
+
         self.a_optimizer = initialize_optimizer(opt.optimizer, opt.lr_a, opt.lr_beta1, opt.lr_beta2,
                                                 opt.lr_decay, opt.lr_rho, opt.lr_fuzz, opt.lr_momentum)
         self.c_optimizer = initialize_optimizer(opt.optimizer, opt.lr_c, opt.lr_beta1, opt.lr_beta2,
                                                 opt.lr_decay, opt.lr_rho, opt.lr_fuzz, opt.lr_momentum)
-
-        self.ph_1 = np.zeros((1, 1))
-
         if load_from_episode is not None:
             self._load(load_path, load_from_episode)
         else:
-            if opt.cnn>0:
-                input_dim = (CNN_STATE_H, CNN_STATE_W, 4)
-                self.actor = create_actor_cnn(input_dim, self.action_space_size)
-                self.critic = create_critic_cnn(input_dim)
-            else:
-                input_dim = STATE_W*STATE_H*LAYERS_ENTITIES
-                self.actor = create_actor(input_dim, self.action_space_size)
-                self.critic = create_critic(input_dim)
+            self.actor = None
+            self.critic = None
 
-    def predict(self, state, diff=None):
+    def predict_actor(self, inputs):
+        prob_dist = self.actor(inputs)
+        return prob_dist
 
-        action_dist = self.actor([state, self.ph_1 if diff is None else diff])
-        state_value = self.critic([state, self.ph_1 if diff is None else diff])
+    def predict_critic(self, inputs):
+        state_value = self.critic(inputs)
+        return state_value
 
-        return action_dist, state_value
-
-    def fit(self, states, diffs, actions_prob, actions, advantages, state_values, returns):
+    def fit(self, actor_input, critic_input, actions_prob, actions, advantages, state_values, returns):
         critic_gamma = 0.5
 
         with tf.GradientTape() as tape1, tf.GradientTape() as tape2:
             mse = tf.keras.losses.MeanSquaredError()
-            pred_values_estim = self.critic(states, training=True)
+            pred_values_estim = self.critic(critic_input, training=True)
             critic_loss = critic_gamma * mse(returns, pred_values_estim)
-            pred_probs = self.actor(states, training=True)
-            pred_actions_prob = tf.expand_dims(tf.gather_nd(pred_probs, actions, 1), 1)
+            pred_probs = self.actor(actor_input, training=True)
+            pred_actions_prob = tf.gather(pred_probs, actions, batch_dims=-1)
             total_actor_loss, actor_ratio_loss = ppo_clipped_loss(actions_prob, pred_actions_prob, advantages, state_values, returns)
         grads1 = tape1.gradient(total_actor_loss, self.actor.trainable_variables)
         grads2 = tape2.gradient(critic_loss, self.critic.trainable_variables)
@@ -152,6 +186,25 @@ class AC:
             load_filename = '{:04}_critic'.format(model_episode)
             self.critic = load_model(Path(path)/load_filename)
         print("Trained agent loaded")
+
+
+class AC_gen(AC):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.input_dim = (CNN_STATE_H, CNN_STATE_W, 1)
+        self.output_grid = GRID_SIZE * GRID_SIZE
+        if self.actor is None:
+            self.actor = create_actor_gen_cnn(self.input_dim, self.output_grid)
+            self.critic = create_critic_gen_cnn(self.input_dim)
+
+
+class AC_sol(AC):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.input_dim = (CNN_STATE_H, CNN_STATE_W, 4)
+        if self.actor is None:
+            self.actor = create_actor_sol_cnn(self.input_dim, self.action_space_size)
+            self.critic = create_critic_sol_cnn(self.input_dim)
 
 
 def initialize_optimizer(optimizer_name: str, learning_rate: float, beta1: float, beta2: float,

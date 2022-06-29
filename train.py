@@ -8,8 +8,8 @@ import wandb
 import tensorflow as tf
 from tensorboardX import SummaryWriter
 
-from core.agent import GAE_PPO
-from core.model import initialize_optimizer, AC
+from core.agent import PPO, PPO_sol, PPO_gen
+from core.model import initialize_optimizer, AC, AC_gen, AC_sol
 from keras import backend as K, Model
 from env import Skiing
 
@@ -25,14 +25,18 @@ def create_agents(opt: Namespace, action_space: int):
     :return: the agent.
     """
 
-    # create policy network
-    policy_model = AC(opt, action_space, opt.load_path, opt.load_solver_agent)
-    # create generator network
-    generator_model = AC(opt, action_space, opt.load_path, opt.load_generator_agent)
-    # Create the solver.
-    solver = GAE_PPO(opt, policy_model, frozen=False)
-    # Create the solver.
-    generator = GAE_PPO(opt, generator_model, frozen=True)
+    # create solver network
+    solver_model = AC_sol(opt, action_space, opt.load_path, opt.load_solver_agent)
+    # create the solver.
+    solver = PPO_sol(opt, solver_model, frozen=False)
+
+    if opt.generator_train:
+        # create generator network
+        generator_model = AC_gen(opt, action_space, opt.load_path, opt.load_generator_agent) if opt.generator_train else None
+        # create the generator.
+        generator = PPO_gen(opt, generator_model, frozen=True)
+    else:
+        generator = None
 
     return solver, generator
 
@@ -41,14 +45,45 @@ def preprocess(stacked_states: tf.Tensor, new_state: np.ndarray, cnn: bool):
     if cnn:
         new_state = K.expand_dims(tf.convert_to_tensor(new_state, tf.float32), -1)
         if stacked_states is None:
-            return K.concatenate([new_state, new_state, new_state, new_state])
+            return K.concatenate([new_state, new_state, new_state, new_state]), new_state
         else:
-            return K.concatenate([new_state, stacked_states[..., :-1]])
+            return K.concatenate([new_state, stacked_states[..., :-1]]), new_state
     else:
         return tf.convert_to_tensor(new_state, tf.float32)
 
 
-def play_loop(opt: Namespace, env: Skiing, solver: Model, generator: Model, logger: Logger):
+def main():
+    global best_result, parser_config
+    args = deepcopy(parser_config)
+
+    # Init loggers
+    if args.wandb:
+        wandb.init(project="EnvKnob", entity="johnminelli")
+        # Init sweep agent configuration
+        if args.sweep_id is not None: args.__dict__.update(wandb.config)
+        wandb.config = args
+        wandb.log({"params": wandb.Table(data=pd.DataFrame({k: [v] for k, v in vars(args).items()}))})
+    if args.tensorboard:
+        tb_writer = SummaryWriter()
+    else: tb_writer = None
+    sol_logger = Logger(mode="train", prefix="sol", episodes=args.episodes, batch_size=args.batch_size, terminal_print_freq=args.print_freq, tensorboard=tb_writer, wand=args.wandb)
+    gen_logger = Logger(mode="train", prefix="gen", episodes=args.episodes, batch_size=args.batch_size, terminal_print_freq=args.print_freq, tensorboard=tb_writer, wand=args.wandb)
+
+    # Set the seed
+    fix_random(args.seed)
+
+    # Create the game environment
+    env = Skiing(args)
+
+    # Create the solver and generator agent
+    solver, generator = create_agents(args, env.action_space)
+    env.set_map_generator(generator)
+
+    # Play the game, using the agent
+    play_loop(args, env, solver, generator, sol_logger, gen_logger)
+
+
+def play_loop(opt: Namespace, env: Skiing, solver: PPO_sol, generator: PPO_gen, sol_logger: Logger, gen_logger: Logger):
     # User input controls
     def register_input():
         for event in pygame.event.get():
@@ -68,79 +103,71 @@ def play_loop(opt: Namespace, env: Skiing, solver: Model, generator: Model, logg
 
     action = 0
     not_running = False
-    ppo_batch = opt.batch_size
-    trained_agent = solver
+    solver_training = True
+    logger = sol_logger
     for episode in range(opt.episodes):
         current_state = env.reset()
-        current_state_input = preprocess(None, current_state, opt.cnn>0)
+        current_state_input, last_state = preprocess(None, current_state, cnn=True)
         logger.episode_start(episode)
         done = False
         total_reward = 0.0
 
         while not done:
-            action_probs, state_value = solver.take_action(current_state_input)
-            action = np.random.choice(env.action_space, p=action_probs[0, :].numpy())
+            action, action_prob, state_value = solver.take_action(current_state_input)
             next_state, reward, done, info = env.step(action, skip=opt.frame_skipping)
 
-            trained_agent.fill_buffer(current_state_input, state_value, action_probs[0, action], action, reward, int(done))
+            if solver_training:
+                solver.fill_buffer(current_state_input, state_value, action_prob, K.expand_dims(action), reward, int(done))
+                total_reward += reward
+            elif info["gen"]:
+                # The policy network predict just on flags while the value network estimate the expected return with the complete observation.
+                # Then on the advantage of returns, the policy is improved.
+                state_value = generator.get_state_value(last_state,  info["gen_diff"])
+                generator.fill_buffer(last_state, state_value, info["gen_probs"], info["gen_pos"], info["gen_rew"], int(done))
+                total_reward += info["gen_rew"]
 
-            # motion interval: can be increased by changing env scroll speed
-            current_state_input = preprocess(current_state_input, next_state, opt.cnn>0)
-            total_reward += reward
+            # preprocess new state
+            current_state_input, last_state = preprocess(current_state_input, next_state, cnn=True)
 
             not_running = not register_input()
             if done or not_running:
                 break
 
-        # add last state value estimate needed for advantage computing
-        _, state_value = solver.take_action(current_state_input)
-        trained_agent.buffer.state_values.append(state_value)
-        # update with data batch collected
-        trained_agent.update(logger)
+        # add last state value estimate needed for advantage computing and update
+        if solver_training:
+            _, _, state_value = solver.take_action(current_state_input)
+            solver.buffer.state_values.append(state_value)
+            # update with data batch collected
+            solver.update(logger)
+        else:
+            state_value = generator.get_state_value(last_state, generator.buffer.difficulties[-1])
+            generator.buffer.state_values.append(state_value)
+            generator.buffer.partial_states.pop()
+            generator.buffer.difficulties.pop()
+            generator.buffer.free_positions.pop()
+            # update with data batch collected (some data comes also from the environment map generation step)
+            generator.update(logger)
 
         logger.episode_stop(total_reward, env.score_points)
 
-        # if episode != 0 and (episode % opt.alternate_training_interval == 0):
-        #     solver.freeze_switch()
-        #     generator.freeze_switch()
-        #     trained_agent = generator if solver.is_frozen else solver
+        # optionally switch training
+        if opt.generator_train and episode != 0 and (episode % (opt.alternate_training_interval*(1 if solver_training else 3)) == 0):
+            # the generator should be trained the double the episodes respect the solver
+            solver.freeze_switch()
+            generator.freeze_switch()
+            solver_training = not solver_training
+            logger = sol_logger if solver_training else gen_logger
+            logger.total_steps = (gen_logger if solver_training else sol_logger).total_steps
+            print("\n\nSwitch training to generator {}".format("solver" if solver_training else "generator"))
 
+        # optionally save models
         if episode != 0 and (episode % opt.agent_save_interval == 0):
             print(f'Saving agent at episode: {episode}.')
             solver.save_model(episode)
+            if opt.generator_train: generator.save_model(episode)
 
         if not_running: break
     env.close()
-
-
-def main():
-    global best_result, parser_config
-    args = deepcopy(parser_config)
-
-    # Init loggers
-    if args.wandb:
-        wandb.init(project="EnvKnob", entity="johnminelli")
-        # Init sweep agent configuration
-        if args.sweep_id is not None: args.__dict__.update(wandb.config)
-        wandb.config = args
-        wandb.log({"params": wandb.Table(data=pd.DataFrame({k: [v] for k, v in vars(args).items()}))})
-    if args.tensorboard:
-        tb_writer = SummaryWriter()
-    else: tb_writer = None
-    train_logger = Logger(mode="train", episodes=args.episodes, batch_size=args.batch_size, terminal_print_freq=args.print_freq, tensorboard=tb_writer, wand=args.wandb)
-
-    # Set the seed
-    fix_random(args.seed)
-
-    # Create the game environment
-    env = Skiing(args, None)
-
-    # Create the solver and generator agent
-    solver, generator = create_agents(args, env.action_space)
-    # env.set_map_generator(generator.take_action)
-
-    # Play the game, using the agent
-    play_loop(args, env, solver, generator, train_logger)
 
 
 if __name__ == '__main__':

@@ -7,7 +7,9 @@ from progressbar import progressbar
 
 class Logger(object):
 
-    def __init__(self, mode, episodes, batch_size, terminal_print_freq=1, tensorboard=None, wand=None):
+    def __init__(self, mode, prefix, episodes, batch_size, terminal_print_freq=1, tensorboard=None, wand=None):
+        self.mode = mode
+        self.prefix = prefix
         self.episodes = episodes
         self.batch_size = batch_size
         self.print_freq = terminal_print_freq
@@ -27,13 +29,9 @@ class Logger(object):
         self.t = None
 
         if mode == "valid":
-            self.prefix = "Valid"
-            self.log_only_at_end = True
             self.writer = Writer(self.t, (0, h - s + ts))
             self.bar_writer = Writer(self.t, (0, h - s + ts + 1))
         elif mode == "train":
-            self.prefix = "Train"
-            self.log_only_at_end = False
             self.writer = Writer(self.t, (0, h - s + tr))
             self.bar_writer = Writer(self.t, (0, h - s + tr + 1))
             self.progress_bar = progressbar.ProgressBar(maxval=self.episodes, fd=Writer(self.t, (0, h - s + e)))
@@ -94,8 +92,8 @@ class Logger(object):
 
     def _log_stats_to_dashboards(self, step, stats):
         for name, value in stats.items():
-            namet = self.prefix + "/" + name
-            namew = self.prefix + "/" + self.prefix.lower() + "_" + name
+            namet = self.mode + "/" + self.prefix.lower() + "_" + name
+            namew = self.mode + "/" + self.prefix.lower() + "_" + name
             if self.tensorboard is not None:
                 self.tensorboard.add_scalar(namet, value, step)
             if self.wandb:
