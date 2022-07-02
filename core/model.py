@@ -139,11 +139,6 @@ class AC:
                                                 opt.lr_decay, opt.lr_rho, opt.lr_fuzz, opt.lr_momentum)
         self.c_optimizer = initialize_optimizer(opt.optimizer, opt.lr_c, opt.lr_beta1, opt.lr_beta2,
                                                 opt.lr_decay, opt.lr_rho, opt.lr_fuzz, opt.lr_momentum)
-        if load_from_episode is not None:
-            self._load(load_path, load_from_episode)
-        else:
-            self.actor = None
-            self.critic = None
 
     def predict_actor(self, inputs):
         prob_dist = self.actor(inputs)
@@ -170,20 +165,20 @@ class AC:
 
         return actor_ratio_loss, critic_loss
 
-    def save(self, model_episode: int):
-        self.actor.save(self.save_path/"{:04}_actor".format(model_episode))
-        self.critic.save(self.save_path/"{:04}_critic".format(model_episode))
+    def save(self, prefix: str, model_episode: int):
+        self.actor.save(self.save_path/"{}_{:04}_actor".format(prefix, model_episode))
+        self.critic.save(self.save_path/"{}_{:04}_critic".format(prefix, model_episode))
 
-    def _load(self, path, model_episode: int):
+    def _load(self, path, prefix, model_episode: int):
         if model_episode == -1:
-            load_filename = '*_actor'
+            load_filename = prefix+'_*_actor'
             self.actor = load_model(Path(sorted(glob.glob(os.path.join(path, load_filename)))[-1]))
-            load_filename = '*_critic'
+            load_filename = prefix+'_*_critic'
             self.critic = load_model(Path(sorted(glob.glob(os.path.join(path, load_filename)))[-1]))
         else:
-            load_filename = '{:04}_actor'.format(model_episode)
+            load_filename = prefix+'_{:04}_actor'.format(model_episode)
             self.actor = load_model(Path(path)/load_filename)
-            load_filename = '{:04}_critic'.format(model_episode)
+            load_filename = prefix+'_{:04}_critic'.format(model_episode)
             self.critic = load_model(Path(path)/load_filename)
         print("Trained agent loaded")
 
@@ -193,7 +188,10 @@ class AC_gen(AC):
         super().__init__(*args, **kwargs)
         self.input_dim = (CNN_STATE_H, CNN_STATE_W, 1)
         self.output_grid = GRID_SIZE * GRID_SIZE
-        if self.actor is None:
+
+        if kwargs.get('load_from_episode', args[3]) is not None:
+            self._load(kwargs.get('load_path', args[2]), "gen", kwargs.get('load_from_episode', args[3]))
+        else:
             self.actor = create_actor_gen_cnn(self.input_dim, self.output_grid)
             self.critic = create_critic_gen_cnn(self.input_dim)
 
@@ -202,7 +200,10 @@ class AC_sol(AC):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.input_dim = (CNN_STATE_H, CNN_STATE_W, 4)
-        if self.actor is None:
+
+        if kwargs.get('load_from_episode', args[3]) is not None:
+            self._load(kwargs.get('load_path', args[2]), "sol", kwargs.get('load_from_episode', args[3]))
+        else:
             self.actor = create_actor_sol_cnn(self.input_dim, self.action_space_size)
             self.critic = create_critic_sol_cnn(self.input_dim)
 

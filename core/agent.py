@@ -97,9 +97,9 @@ class PPO(object):
         """Switch the internal behaviour to evaluation"""
         self.is_evaluating = not self.is_evaluating
 
-    def save_model(self, model_episode: int):
+    def save_model(self, prefix: str = "", model_episode: int = -1):
         """Save the model"""
-        self.actor_critic.save(model_episode)
+        self.actor_critic.save(prefix, model_episode)
 
 
 class PPO_sol(PPO):
@@ -115,12 +115,12 @@ class PPO_sol(PPO):
         expected_cum_returns, advantages = self._get_advantages()
 
         evenly_distributed_log = list(
-            map(lambda x: len(x), np.array_split(np.array((range(len(self.buffer.rewards)))), self.K_epochs)))
+            map(lambda x: len(x), np.array_split(np.array((range(MAX_STEPS))), self.K_epochs)))
         batch_indices = np.arange(len(self.buffer.rewards))
         for i in range(self.K_epochs):
             np.random.shuffle(batch_indices)
             losses = []
-            for lower_end in [a for a in range(MAX_STEPS)][::self.batch_size]:
+            for lower_end in [a for a in range(len(self.buffer.rewards))][::self.batch_size]:
                 higher_end = lower_end + self.batch_size
                 minibatch_indices = batch_indices[lower_end:higher_end]
                 actor_loss, critic_loss = self.actor_critic.fit(
@@ -185,12 +185,12 @@ class PPO_gen(PPO):
         expected_cum_returns, advantages = self._get_advantages()
 
         evenly_distributed_log = list(
-            map(lambda x: len(x), np.array_split(np.array((range(len(self.buffer.rewards)))), self.K_epochs)))
+            map(lambda x: len(x), np.array_split(np.array((range(MAX_STEPS))), self.K_epochs)))
         batch_indices = np.arange(len(self.buffer.rewards))
         for i in range(self.K_epochs):
             np.random.shuffle(batch_indices)
             losses = []
-            for lower_end in [a for a in range(MAX_STEPS)][::self.batch_size]:
+            for lower_end in [a for a in range(len(self.buffer.rewards))][::self.batch_size]:
                 higher_end = lower_end + self.batch_size
                 minibatch_indices = batch_indices[lower_end:higher_end]
                 actor_loss, critic_loss = self.actor_critic.fit(

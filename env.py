@@ -83,14 +83,16 @@ class ObstacleClass(pygame.sprite.Sprite):
 
 
 class Skiing(Env):
-    def __init__(self, opt, generator=None):
+    def __init__(self, opt, generator=None, fixed_diff=None, endless_mode=False):
         super(Skiing, self).__init__()
         self.opt = opt
         self.step_reward = opt.step_reward
         self.generator = generator
+        self.diff = fixed_diff
         self.generator_reward = 0.0
         self.obs_w = CNN_STATE_W  # if not opt.fc else STATE_W
         self.obs_h = CNN_STATE_H  # if not opt.fc else STATE_H
+        self.endless_mode = endless_mode
         self.action_space = 5
         self.steps = 0
 
@@ -175,7 +177,7 @@ class Skiing(Env):
         self.map_position = 0
         self.score_points = 0
         self.steps = 0
-        self.auxiliary_input = random.choice([-1,-0.5,0.5,1])
+        self.auxiliary_input = random.choice([-1,-0.5,0.5,1]) if self.diff is None else self.diff
 
         # Preparation screen
         self.create_map()
@@ -224,7 +226,7 @@ class Skiing(Env):
             reward_over_skipped_steps += step_reward
             self.generator_reward += step_reward*self.auxiliary_input
             # Check end of episode
-            done = self.steps >= MAX_STEPS
+            done = (not self.endless_mode) and self.steps >= MAX_STEPS
             if done:
                 info["gen_rew"] = info.get("gen_rew", 0) + (10 if self.score_points > 0 else -10)
                 break
@@ -239,7 +241,7 @@ class Skiing(Env):
         self.clock.tick(30)  # Graphics are updated 30 times per second
         # Show score
         score_text = self.font.render("Score:" + str(self.score_points), 1, (0, 0, 0))
-        difficulty_text = self.font.render("Difficulty:" + str((self.auxiliary_input+1)/2), 1, (0, 0, 0))
+        difficulty_text = self.font.render("Difficulty:" + str(1-((self.auxiliary_input+1)/2)), 1, (0, 0, 0))
         # Redraw the picture
         self.screen.fill([255, 255, 255])
         self.obstacles.draw(self.screen)

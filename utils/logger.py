@@ -28,15 +28,11 @@ class Logger(object):
         self.epoch = None
         self.t = None
 
-        if mode == "valid":
-            self.writer = Writer(self.t, (0, h - s + ts))
-            self.bar_writer = Writer(self.t, (0, h - s + ts + 1))
-        elif mode == "train":
-            self.writer = Writer(self.t, (0, h - s + tr))
-            self.bar_writer = Writer(self.t, (0, h - s + tr + 1))
-            self.progress_bar = progressbar.ProgressBar(maxval=self.episodes, fd=Writer(self.t, (0, h - s + e)))
-            [print('') for i in range(2)]
-            self.progress_bar.start()
+        self.writer = Writer(self.t, (0, h - s + tr))
+        self.bar_writer = Writer(self.t, (0, h - s + tr + 1))
+        self.progress_bar = progressbar.ProgressBar(maxval=self.episodes, fd=Writer(self.t, (0, h - s + e)))
+        [print('') for i in range(2)]
+        self.progress_bar.start()
 
     def set_tensorboard(self, writer):
         self.tensorboard = writer
@@ -59,27 +55,30 @@ class Logger(object):
             self.steps += steps
             self.total_steps += steps
             # losses error & metrics
-            for single_update_losses in losses:
-                for k, v in single_update_losses.items():
-                    self.total_losses[k] = (self.total_losses.get(k, []) + [v.numpy()])
+            if len(losses) > 0:
+                for single_update_losses in losses:
+                    for k, v in single_update_losses.items():
+                        self.total_losses[k] = (self.total_losses.get(k, []) + [v.numpy()])
 
-            avg_losses = np.mean([[np.mean((v).numpy()) for v in l.values()] for l in losses], 0)
-            self.log(' * ' + ', '.join(['Avg '+str(k).capitalize()+' : {:.5f}'.format(v) for k, v in zip(self.total_losses.keys(), avg_losses)])+'\tLr: '+str(lr))
-            self._log_stats_to_dashboards(self.total_steps, {str(k).capitalize():v for k, v in zip(self.total_losses.keys(), avg_losses)})
-            self._log_stats_to_dashboards(self.total_steps, {"AC_lr": lr})
+                avg_losses = np.mean([[np.mean((v).numpy()) for v in l.values()] for l in losses], 0)
+                self.log(' * ' + ', '.join(['Avg ' + str(k).capitalize() + ' : {:.5f}'.format(v) for k, v in
+                                            zip(self.total_losses.keys(), avg_losses)]) + '\tLr: ' + str(lr))
+                self._log_stats_to_dashboards(self.total_steps, {str(k).capitalize(): v for k, v in
+                                                                 zip(self.total_losses.keys(), avg_losses)})
+                self._log_stats_to_dashboards(self.total_steps, {"AC_lr": lr})
 
     def episode_stop(self, total_reward, score):
         if self.episode is not None:
             episode_time = time.time() - self.episode_start_time
             avg_time = episode_time/self.steps
             avg_reward = total_reward / self.steps
-            avg_losses = np.mean(np.array(list(self.total_losses.values())), 1)
+            avg_losses = np.mean(np.array(list(self.total_losses.values())), 1) if len(self.total_losses) > 0 else []
             reward_over_time = total_reward / episode_time
 
             self.log('Ep: %d / %d - Time: %d sec' % (self.episode, self.episodes, episode_time) + '\t' +
                      ' * Game Score : {}'.format(score) +
-                     ' * Avg Reward : {:.3f}'.format(avg_reward) + ', Reward/time : {:.3f}'.format(reward_over_time) +
-                     ' - Avg Losses : [' + ', '.join([str(l) for l in avg_losses]) + ']' +
+                     ' - Avg Reward : {:.3f}'.format(avg_reward) + ', Reward/time : {:.3f}'.format(reward_over_time) +
+                     (' - Avg Losses : [' + ', '.join([str(l) for l in avg_losses]) + ']' if len(avg_losses)>0 else '') +
                      ' - Avg Time : {:.3f}'.format(avg_time))
             self._log_stats_to_dashboards(self.total_steps, {"Game_score": score, "Avg_reward": avg_reward, "Reward_over_time": reward_over_time, "Avg_time": avg_time})
 

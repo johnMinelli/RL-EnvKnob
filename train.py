@@ -8,8 +8,8 @@ import wandb
 import tensorflow as tf
 from tensorboardX import SummaryWriter
 
-from core.agent import PPO, PPO_sol, PPO_gen
-from core.model import initialize_optimizer, AC, AC_gen, AC_sol
+from core.agent import PPO_sol, PPO_gen
+from core.model import AC_gen, AC_sol
 from keras import backend as K, Model
 from env import Skiing
 
@@ -30,9 +30,9 @@ def create_agents(opt: Namespace, action_space: int):
     # create the solver.
     solver = PPO_sol(opt, solver_model, frozen=False)
 
-    if opt.generator_train:
+    if opt.generator:
         # create generator network
-        generator_model = AC_gen(opt, action_space, opt.load_path, opt.load_generator_agent) if opt.generator_train else None
+        generator_model = AC_gen(opt, action_space, opt.load_path, opt.load_generator_agent) if opt.generator else None
         # create the generator.
         generator = PPO_gen(opt, generator_model, frozen=True)
     else:
@@ -141,6 +141,7 @@ def play_loop(opt: Namespace, env: Skiing, solver: PPO_sol, generator: PPO_gen, 
             solver.update(logger)
         else:
             state_value = generator.get_state_value(last_state, generator.buffer.difficulties[-1])
+            generator.buffer.rewards[-1] = generator.buffer.rewards[-1] + info["gen_rew"]
             generator.buffer.state_values.append(state_value)
             generator.buffer.partial_states.pop()
             generator.buffer.difficulties.pop()
@@ -151,20 +152,20 @@ def play_loop(opt: Namespace, env: Skiing, solver: PPO_sol, generator: PPO_gen, 
         logger.episode_stop(total_reward, env.score_points)
 
         # optionally switch training
-        if opt.generator_train and episode != 0 and (episode % (opt.alternate_training_interval*(1 if solver_training else 3)) == 0):
+        if opt.generator and episode != 0 and (episode % (opt.alternate_training_interval*(1 if solver_training else 3)) == 0):
             # the generator should be trained the double the episodes respect the solver
             solver.freeze_switch()
             generator.freeze_switch()
             solver_training = not solver_training
             logger = sol_logger if solver_training else gen_logger
             logger.total_steps = (gen_logger if solver_training else sol_logger).total_steps
-            print("\n\nSwitch training to generator {}".format("solver" if solver_training else "generator"))
+            print("\n\nSwitch training to the {}".format("solver" if solver_training else "generator"))
 
         # optionally save models
         if episode != 0 and (episode % opt.agent_save_interval == 0):
             print(f'Saving agent at episode: {episode}.')
-            solver.save_model(episode)
-            if opt.generator_train: generator.save_model(episode)
+            solver.save_model("sol", episode)
+            if opt.generator: generator.save_model("gen", episode)
 
         if not_running: break
     env.close()

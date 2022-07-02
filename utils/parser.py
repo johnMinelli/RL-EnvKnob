@@ -63,7 +63,7 @@ class Options():
         self.parser.add_argument('-rec', '--record', required=False, action='store_true', help='Whether the game should be recorded. Please note that you need to have ffmpeg in your path!')
 
         self.parser.add_argument('--fc', action='store_true', help='Use simple CNN approximator instead of FC.')
-        self.parser.add_argument('--generator_train', action='store_true', help='Alternate sovler and generator training.')
+        self.parser.add_argument('--generator', action='store_true', help='Use a generator agent to create the map.')
         self.parser.add_argument('--frame_skipping', type=positive_int, default=8, required=False, help='The frames to skip per action (default %(default)s).')
         self.parser.add_argument('--alternate_training_interval', type=positive_int, default=10, required=False, help='The episodes to run before alternate training between solver and generator (default %(default)s).')
         self.parser.add_argument('-e', '--episodes', type=positive_int, default=1000, required=False, help='The episodes to run the training procedure (default %(default)s).')
@@ -81,6 +81,8 @@ class Options():
         self.parser.add_argument('--lr_rho', type=positive_float, default=0.95, required=False, help='The rho for the optimizer (default %(default)s).')
         self.parser.add_argument('--lr_fuzz', type=positive_float, default=0.01, required=False, help='The fuzz factor for the "rmsprop" optimizer (default %(default)s).')
         self.parser.add_argument('--lr_momentum', type=positive_float, default=0.1, required=False, help='The momentum for the "sgd" optimizer (default %(default)s).')
+
+        self.parser.add_argument('--eval_difficulty', type=float, default=0, required=False, help='The difficulty parameter to set for the generator in evaluation: from -1 hard to 1 easy.')
 
         self.initialized = True
 
@@ -108,9 +110,6 @@ class Options():
 
     def _check_args_consistency(self):
         """ Checks the input arguments. """
-        # Set default variables.
-        poor_observe = bad_target_model_change = 500
-        frame_history_ceiling = 10
 
         # Create the path to the files, if necessary.
         self.opt.models_path = Path(self.opt.save_path)/"models/"
@@ -123,3 +122,6 @@ class Options():
 
         if self.opt.load_path is None:
             self.opt.load_path = self.opt.models_path
+
+        if self.opt.eval_difficulty < -1 or self.opt.eval_difficulty > 1:
+            raise ValueError('Difficulty values allowed are in range [-1,1]')
