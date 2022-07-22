@@ -1,3 +1,16 @@
+# EnvKnob
+
+![env example](docs/env.png)
+
+Project inspired from:
+
+`Linus Gisslén, Andy Eakins, Camilo Gordillo, Joakim Bergdahl, and Konrad Tollmar. 2021. Adversarial Reinforcement Learning for Procedural Content Generation. In 2021 IEEE Conference
+on Games (CoG). IEEE Press, 1–8. https://doi.org/10.1109/CoG52621.2021.9619053`
+
+[Documentation with approach explained](docs/main.pdf)
+
+[Presentation of the project](docs/AAS_project_discussion.pdf)
+
 ## Usage
 To train 
 
