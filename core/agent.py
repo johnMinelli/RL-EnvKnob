@@ -5,7 +5,7 @@ import tensorflow as tf
 import numpy as np
 from keras import backend as K
 from core.model import AC
-from env import GRID_SIZE, MAX_STEPS
+from core.env import GRID_SIZE, MAX_STEPS
 from utils.logger import Logger
 
 
@@ -63,7 +63,6 @@ class PPO(object):
         """
         returns = []
         discounted_reward = 0
-
         if mc_rollout_method:
             # Monte Carlo estimate of returns
             for total_reward, is_terminal in zip(reversed(self.buffer.rewards), reversed(self.buffer.is_terminals)):
@@ -115,7 +114,7 @@ class PPO_sol(PPO):
         expected_cum_returns, advantages = self._get_advantages()
 
         evenly_distributed_log = list(
-            map(lambda x: len(x), np.array_split(np.array((range(MAX_STEPS))), self.K_epochs)))
+            map(lambda x: len(x), np.array_split(np.array((range(MAX_STEPS))), self.K_epochs)))  # numbered idx for log
         batch_indices = np.arange(len(self.buffer.rewards))
         for i in range(self.K_epochs):
             np.random.shuffle(batch_indices)
@@ -185,7 +184,7 @@ class PPO_gen(PPO):
         expected_cum_returns, advantages = self._get_advantages()
 
         evenly_distributed_log = list(
-            map(lambda x: len(x), np.array_split(np.array((range(MAX_STEPS))), self.K_epochs)))
+            map(lambda x: len(x), np.array_split(np.array((range(MAX_STEPS))), self.K_epochs)))  # numbered idx for log
         batch_indices = np.arange(len(self.buffer.rewards))
         for i in range(self.K_epochs):
             np.random.shuffle(batch_indices)

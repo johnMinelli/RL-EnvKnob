@@ -8,7 +8,7 @@ import tensorflow as tf
 from core.agent import PPO_sol, PPO_gen
 from core.model import AC_gen, AC_sol
 from keras import backend as K
-from env import Skiing
+from core.env import Skiing
 
 from utils.parser import Options
 

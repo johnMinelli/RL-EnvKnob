@@ -11,7 +11,7 @@ from tensorboardX import SummaryWriter
 from core.agent import PPO_sol, PPO_gen
 from core.model import AC_gen, AC_sol
 from keras import backend as K, Model
-from env import Skiing
+from core.env import Skiing
 
 from utils.logger import Logger
 from utils.parser import Options
@@ -32,7 +32,7 @@ def create_agents(opt: Namespace, action_space: int):
 
     if opt.generator:
         # create generator network
-        generator_model = AC_gen(opt, action_space, opt.load_path, opt.load_generator_agent) if opt.generator else None
+        generator_model = AC_gen(opt, action_space, opt.load_path, opt.load_generator_agent)
         # create the generator.
         generator = PPO_gen(opt, generator_model, frozen=True)
     else:

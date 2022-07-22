@@ -13,7 +13,7 @@ import tensorflow as tf
 from keras.optimizers.schedules.learning_rate_schedule import ExponentialDecay
 from keras.saving.save import load_model
 
-from env import CNN_STATE_W, CNN_STATE_H, GRID_SIZE
+from core.env import CNN_STATE_W, CNN_STATE_H, GRID_SIZE
 
 
 def create_actor_gen_cnn(shape: tuple, grid_size: int) -> Model:

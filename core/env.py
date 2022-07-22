@@ -261,8 +261,8 @@ class Skiing(Env):
         # max_score = abs(WIN_SCORE if self.score_points > 0 else LOOSE_SCORE)
         # end = (mid if self.score_points>0 else -mid)+int(abs(self.score_points) * mid / max_score)
         #
+        # from skimage.transform import resize
         # observation[max(0, self.skier.rect.top):self.skier.rect.bottom,
-        # max(0, self.skier.rect.left):self.skier.rect.right, 0] = 1
         # for obstacle in self.obstacles:
         #     observation[max(0, obstacle.rect.top):obstacle.rect.bottom,
         #     max(0, obstacle.rect.left):obstacle.rect.right, 1 if obstacle.type == 'tree' else 2] = 1

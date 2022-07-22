@@ -11,7 +11,7 @@ from tensorboardX import SummaryWriter
 from core.agent import PPO_sol, PPO_gen
 from core.model import AC_gen, AC_sol
 from keras import backend as K, Model
-from env import Skiing
+from core.env import Skiing
 
 from utils.logger import Logger
 from utils.parser import Options
