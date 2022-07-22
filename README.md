@@ -2,7 +2,7 @@
 
 ![env example](docs/env.png)
 
-Project inspired from:
+Project inspired by:
 
 `Linus Gisslén, Andy Eakins, Camilo Gordillo, Joakim Bergdahl, and Konrad Tollmar. 2021. Adversarial Reinforcement Learning for Procedural Content Generation. In 2021 IEEE Conference
 on Games (CoG). IEEE Press, 1–8. https://doi.org/10.1109/CoG52621.2021.9619053`
